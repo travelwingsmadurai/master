@@ -1,0 +1,81 @@
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // User profiles
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+        && request.auth.uid == userId;
+    }
+
+    // Profit ledger: owners only
+    match /profitLedger/{entry} {
+      allow read: if request.auth != null
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.role == "owner";
+
+      allow write: if false;
+    }
+
+    // Invoices
+    match /invoices/{invoice} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Invoice numbering counters: owners only
+    match /counters/{counterId} {
+      allow read, write: if request.auth != null
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.role == "owner";
+    }
+
+    // Customers
+    match /customers/{customer} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Suppliers
+    match /suppliers/{supplier} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Staff
+    match /staff/{staffMember} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Receipts
+    match /receipts/{receipt} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Account ledger
+    match /accountLedger/{entry} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Outstanding balances
+    match /outstandings/{outstanding} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Supplier payment vouchers
+    match /supplierPaymentVouchers/{voucher} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Cancellations
+    match /cancellations/{cancellation} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Bank ledger
+    match /bankLedger/{transaction} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
