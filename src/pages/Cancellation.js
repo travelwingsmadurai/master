@@ -1,540 +1,617 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Container, Typography, TextField, Button, Paper, Box, Grid,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  CircularProgress, Alert, Dialog, DialogTitle, DialogContent, DialogActions, MenuItem,
-  IconButton, Tooltip, Avatar
+  Box, Typography, TextField, Button, Paper, Grid, Divider, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow, CircularProgress, Alert,
+  Dialog, DialogTitle, DialogContent, DialogActions, MenuItem, IconButton,
+  Tooltip, Avatar, InputAdornment
 } from '@mui/material';
-import { 
-  Search, Cancel, CheckCircle, PictureAsPdf, Edit, Delete, 
-  Receipt, Person, CalendarToday, AttachMoney, Warning, Notes, Clear
+import {
+  Search, Cancel, CheckCircle, PictureAsPdf, Delete, Receipt, Person,
+  CalendarToday, AttachMoney, Warning, Notes, Clear
 } from '@mui/icons-material';
 import { db } from '../config/firebase';
-import { collection, query, where, getDocs, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import {
+  collection, query, where, getDocs, addDoc, doc, deleteDoc, writeBatch
+} from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
+const today = () => new Date().toISOString().slice(0, 10);
+const emptyRefund = () => ({
+  refundAmount: '', refundReason: '', refundDate: today(), remarks: '',
+  paymentMethod: '', cancellationCharges: '', supplierCancellationPayable: ''
+});
+
 const Cancellation = () => {
-  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [customers, setCustomers] = useState([]);
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [invoiceSearch, setInvoiceSearch] = useState('');
+  const [customerInvoices, setCustomerInvoices] = useState([]);
   const [invoiceDetails, setInvoiceDetails] = useState(null);
+  const [cancellations, setCancellations] = useState([]);
+  const [refundData, setRefundData] = useState(emptyRefund);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [openConfirmDialog, setOpenConfirmDialog] = useState(false);
-  const [cancellations, setCancellations] = useState([]);
-  const [editingCancellation, setEditingCancellation] = useState(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const [refundData, setRefundData] = useState({
-    refundAmount: '',
-    refundReason: '',
-    refundDate: new Date().toISOString().split('T')[0],
-    remarks: '',
-    paymentMethod: '',
-    cancellationCharges: ''
-  });
-
-  useEffect(() => {
-    const fetchCancellations = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, 'cancellations'));
-        const cancellationsData = querySnapshot.docs.map(doc => ({
-          id: doc.id, ...doc.data()
-        })).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        setCancellations(cancellationsData);
-      } catch (err) {
-        console.error('Error fetching cancellations:', err);
-      }
-    };
-    fetchCancellations();
-  }, []);
-
-  const calculateNetRefundAmount = () => {
-    const refundAmount = parseFloat(refundData.refundAmount) || 0;
-    const cancellationCharges = parseFloat(refundData.cancellationCharges) || 0;
-    return Math.max(0, refundAmount - cancellationCharges);
-  };
-
-  const netRefundAmount = calculateNetRefundAmount();
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setRefundData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const formatCurrency = (value) => {
-    const num = parseFloat(value);
-    return isNaN(num) ? '₹0.00' : new Intl.NumberFormat('en-IN', {
-      style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2
-    }).format(num).replace('₹', '₹ ');
-  };
-
-  const handleSearch = async () => {
-    if (!invoiceNumber.trim()) return setError('Please enter an invoice number');
-
-    setLoading(true);
-    setError('');
-    setSuccess('');
-    setInvoiceDetails(null);
-
-    try {
-      const q = query(collection(db, 'invoices'), where('invoiceNumber', '==', invoiceNumber));
-      const snapshot = await getDocs(q);
-      
-      if (snapshot.empty) return setError('Invoice not found');
-      
-      const docSnap = snapshot.docs[0];
-      const data = docSnap.data();
-      
-      if (data.status === 'cancelled') return setError('This invoice is already cancelled.');
-
-      setInvoiceDetails(data);
-      setRefundData(prev => ({
-        ...prev,
-        refundAmount: data.totalAmount?.toString() || data.ticketPrice?.toString() || '',
-        paymentMethod: data.paymentMethod || ''
-      }));
-
-    } catch (err) {
-      console.error('Error fetching invoice:', err);
-      setError('Error fetching invoice. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const validateForm = () => {
-    if (!invoiceDetails) return setError('Please search for a valid invoice first'), false;
-
-    const refundAmt = parseFloat(refundData.refundAmount) || 0;
-    const cancelCharges = parseFloat(refundData.cancellationCharges) || 0;
-    const originalAmt = parseFloat(invoiceDetails.totalAmount || invoiceDetails.ticketPrice) || 0;
-
-    if (!refundData.refundAmount || isNaN(refundAmt)) return setError('Please enter a valid refund amount'), false;
-    if (refundAmt > originalAmt) return setError('Refund amount cannot exceed original invoice amount'), false;
-    if (cancelCharges > refundAmt) return setError('Cancellation charges cannot exceed refund amount'), false;
-    if (!refundData.refundReason) return setError('Please select a refund reason'), false;
-
-    return true;
-  };
-
-  const handleSubmit = () => {
-    if (!validateForm()) return;
-    setOpenConfirmDialog(true);
-  };
-
-  const generatePdf = (cancellation) => {
-    const doc = new jsPDF();
-    doc.setFontSize(18); doc.setFont('helvetica', 'bold');
-    doc.text('TRAVELWINGS - CANCELLATION RECEIPT', 105, 20, { align: 'center' });
-    
-    doc.setFontSize(12); doc.setFont('helvetica', 'normal');
-    doc.text(`Invoice Number: ${cancellation.invoiceNumber}`, 20, 40);
-    doc.text(`Customer Name: ${cancellation.customerName}`, 20, 50);
-    doc.text(`Refund Date: ${cancellation.refundDate}`, 20, 60);
-    
-    doc.text(`Original Amount: ${formatCurrency(cancellation.originalAmount)}`, 20, 80);
-    doc.text(`Refund Amount: ${formatCurrency(cancellation.refundAmount)}`, 20, 90);
-    doc.text(`Cancellation Charges: ${formatCurrency(cancellation.cancellationCharges)}`, 20, 100);
-    doc.text(`Net Refund: ${formatCurrency(cancellation.netRefundAmount)}`, 20, 110);
-    doc.text(`Payment Method: ${cancellation.paymentMethod}`, 20, 120);
-    doc.text(`Reason: ${cancellation.refundReason}`, 20, 130);
-    
-    doc.setFontSize(10); doc.setTextColor(100);
-    doc.text(`Refund ID: ${cancellation.refundId}`, 105, 160, { align: 'center' });
-    doc.text('Thank you for your business!', 105, 170, { align: 'center' });
-    
-    doc.save(`Cancellation_${cancellation.invoiceNumber}.pdf`);
-  };
-
-  const confirmRefund = async () => {
-    setOpenConfirmDialog(false);
-    setLoading(true);
-    setError('');
-
-    try {
-      if (!invoiceDetails) throw new Error('Invoice details not available');
-
-      const refundId = `REF${Math.floor(Math.random() * 10000)}`;
-      const cancellationData = {
-        invoiceNumber: invoiceDetails.invoiceNumber || '',
-        customerName: invoiceDetails.customerName || '',
-        originalAmount: invoiceDetails.totalAmount || invoiceDetails.ticketPrice || 0,
-        ...refundData,
-        refundAmount: netRefundAmount,
-        netRefundAmount: netRefundAmount,
-        refundId,
-        createdAt: new Date().toISOString()
-      };
-
-      const docRef = await addDoc(collection(db, 'cancellations'), cancellationData);
-      
-      // Update Invoice Status to Cancelled (Optional but recommended based on past phases)
-      if (invoiceDetails.id) {
-        await updateDoc(doc(db, 'invoices', invoiceDetails.id), { status: 'cancelled' });
-      }
-      
-      setSuccess(`Refund successful! Refund ID: ${refundId}`);
-      setCancellations(prev => [{ id: docRef.id, ...cancellationData }, ...prev]);
-      
-      // Reset form
-      setInvoiceNumber('');
-      setInvoiceDetails(null);
-      setRefundData({
-        refundAmount: '', refundReason: '', refundDate: new Date().toISOString().split('T')[0],
-        remarks: '', paymentMethod: '', cancellationCharges: ''
-      });
-
-    } catch (err) {
-      console.error('Refund error:', err);
-      setError(err.message || 'Error processing refund');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEdit = (cancellation) => {
-    setEditingCancellation(cancellation);
-    setInvoiceNumber(cancellation.invoiceNumber);
-    setRefundData({
-      refundAmount: cancellation.refundAmount.toString(),
-      refundReason: cancellation.refundReason,
-      refundDate: cancellation.refundDate,
-      remarks: cancellation.remarks,
-      paymentMethod: cancellation.paymentMethod,
-      cancellationCharges: cancellation.cancellationCharges.toString()
-    });
-    setInvoiceDetails({
-      invoiceNumber: cancellation.invoiceNumber,
-      customerName: cancellation.customerName,
-      totalAmount: cancellation.originalAmount,
-      paymentMethod: cancellation.paymentMethod
-    });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const updateCancellation = async () => {
-    setLoading(true);
-    try {
-      await updateDoc(doc(db, 'cancellations', editingCancellation.id), {
-        ...refundData,
-        refundAmount: netRefundAmount,
-        netRefundAmount: netRefundAmount
-      });
-
-      setCancellations(prev => prev.map(item => 
-        item.id === editingCancellation.id ? 
-        { ...item, ...refundData, refundAmount: netRefundAmount, netRefundAmount } : 
-        item
-      ));
-
-      setSuccess('Cancellation updated successfully!');
-      setEditingCancellation(null);
-      setInvoiceNumber('');
-      setInvoiceDetails(null);
-      setRefundData({
-        refundAmount: '', refundReason: '', refundDate: new Date().toISOString().split('T')[0],
-        remarks: '', paymentMethod: '', cancellationCharges: ''
-      });
-    } catch (err) {
-      console.error('Error updating cancellation:', err);
-      setError('Error updating cancellation');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this cancellation?')) {
-      try {
-        await deleteDoc(doc(db, 'cancellations', id));
-        setCancellations(prev => prev.filter(item => item.id !== id));
-        setSuccess('Cancellation deleted successfully!');
-      } catch (err) {
-        console.error('Error deleting cancellation:', err);
-        setError('Error deleting cancellation');
-      }
-    }
-  };
-
-  // ─── Custom Theme Styles ───
   const inputStyle = {
     '& .MuiOutlinedInput-root': {
       borderRadius: 2, backgroundColor: '#fff',
       '& fieldset': { borderColor: '#e0e0e0' },
-      '&:hover fieldset': { borderColor: '#1976d2' },
+      '&:hover fieldset': { borderColor: '#1976d2' }
     }
   };
 
+  const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
+  const filteredCustomers = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return customers;
+    return customers.filter(c =>
+      String(c.name || '').toLowerCase().includes(q) ||
+      String(c.phone || '').toLowerCase().includes(q) ||
+      String(c.email || '').toLowerCase().includes(q)
+    );
+  }, [customers, customerSearch]);
+
+  const filteredInvoices = useMemo(() => {
+    const q = invoiceSearch.trim().toLowerCase();
+    if (!q) return customerInvoices;
+    return customerInvoices.filter(i =>
+      String(i.invoiceNumber || '').toLowerCase().includes(q) ||
+      String(i.bookingId || '').toLowerCase().includes(q)
+    );
+  }, [customerInvoices, invoiceSearch]);
+
+  const netRefundAmount = Math.max(
+    0,
+    (parseFloat(refundData.refundAmount) || 0) -
+    (parseFloat(refundData.cancellationCharges) || 0)
+  );
+
+  const formatCurrency = value => {
+    const n = Number(value) || 0;
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency', currency: 'INR', minimumFractionDigits: 2
+    }).format(n);
+  };
+
+  const loadCancellations = async () => {
+    const snap = await getDocs(collection(db, 'cancellations'));
+    setCancellations(snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [customerSnap] = await Promise.all([
+          getDocs(collection(db, 'customers')),
+          loadCancellations()
+        ]);
+        setCustomers(customerSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))));
+      } catch (e) {
+        console.error(e);
+        setError('Unable to load customers or cancellation history.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const resetSelection = () => {
+    setSelectedCustomerId('');
+    setCustomerSearch('');
+    setInvoiceSearch('');
+    setCustomerInvoices([]);
+    setInvoiceDetails(null);
+    setRefundData(emptyRefund());
+  };
+
+  const handleCustomerSelect = async e => {
+    const id = e.target.value;
+    setSelectedCustomerId(id);
+    setInvoiceDetails(null);
+    setInvoiceSearch('');
+    setCustomerInvoices([]);
+    setRefundData(emptyRefund());
+    setError('');
+    setSuccess('');
+    if (!id) return;
+
+    setLoading(true);
+    try {
+      const snap = await getDocs(query(
+        collection(db, 'invoices'), where('customerId', '==', id)
+      ));
+      const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter(i => i.status !== 'cancelled')
+        .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+      setCustomerInvoices(rows);
+      if (!rows.length) setError('No active invoices found for this customer.');
+    } catch (e) {
+      console.error(e);
+      setError('Unable to load this customer’s invoices.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const selectInvoice = invoice => {
+    setInvoiceDetails(invoice);
+    const total = Number(invoice.totalAmount ?? invoice.ticketPrice ?? 0);
+    setRefundData({
+      ...emptyRefund(),
+      refundAmount: total.toFixed(2),
+      paymentMethod: invoice.paymentMethod || ''
+    });
+    setError('');
+    setSuccess('');
+  };
+
+  const handleRefundChange = e => {
+    const { name, value } = e.target;
+    setRefundData(p => ({ ...p, [name]: value }));
+  };
+
+  const validate = () => {
+    if (!selectedCustomerId || !invoiceDetails) {
+      setError('Select a customer and an active invoice first.');
+      return false;
+    }
+    const refund = Number(refundData.refundAmount);
+    const charges = Number(refundData.cancellationCharges || 0);
+    const original = Number(invoiceDetails.totalAmount ?? invoiceDetails.ticketPrice ?? 0);
+    if (!Number.isFinite(refund) || refund < 0 || refund > original) {
+      setError('Refund amount must be between 0 and the original invoice amount.');
+      return false;
+    }
+    if (!Number.isFinite(charges) || charges < 0 || charges > refund) {
+      setError('Cancellation charges cannot exceed the refund amount.');
+      return false;
+    }
+    if (!refundData.refundDate) {
+      setError('Please select the cancellation date.');
+      return false;
+    }
+    const supplierPayable = Number(refundData.supplierCancellationPayable || 0);
+    if (!Number.isFinite(supplierPayable) || supplierPayable < 0) {
+      setError('Supplier cancellation payable must be zero or a positive amount.');
+      return false;
+    }
+    return true;
+  };
+
+  const processCancellation = async () => {
+    if (!validate()) return;
+    setConfirmOpen(false);
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const invoiceId = invoiceDetails.id;
+      const invoiceNumber = invoiceDetails.invoiceNumber || '';
+      const originalAmount = Number(invoiceDetails.totalAmount ?? invoiceDetails.ticketPrice ?? 0);
+      const charges = Number(refundData.cancellationCharges || 0);
+      const supplierCancellationPayable = Number(refundData.supplierCancellationPayable || 0);
+      const refund = Number(refundData.refundAmount || 0);
+      const cancellation = {
+        invoiceId,
+        invoiceNumber,
+        customerId: selectedCustomerId,
+        customerName: selectedCustomer?.name || invoiceDetails.customerName || '',
+        originalAmount,
+        refundAmount: refund,
+        cancellationCharges: charges,
+        netRefundAmount: Math.max(0, refund - charges),
+        supplierCancellationPayable,
+        refundReason: refundData.refundReason || '',
+        refundDate: refundData.refundDate,
+        remarks: refundData.remarks || '',
+        paymentMethod: refundData.paymentMethod || '',
+        status: 'completed',
+        deletedInvoice: invoiceDetails,
+        createdAt: new Date().toISOString()
+      };
+
+      // Keep an audit record, then remove the cancelled invoice and its invoice-ledger rows.
+      // Receipt records are deliberately retained: deleting a receipt would erase a real payment.
+      const batch = writeBatch(db);
+      const invoiceRef = doc(db, 'invoices', invoiceId);
+      batch.delete(invoiceRef);
+
+      const ledgerSnap = await getDocs(collection(db, 'accountLedger'));
+      ledgerSnap.docs.forEach(d => {
+        const x = d.data();
+        const matchesInvoice = String(x.invoiceNumber || x.invoiceNo || x.ref || x.reference || '') === String(invoiceNumber);
+        const sameCustomer = !x.customerId || x.customerId === selectedCustomerId;
+        const type = String(x.type || x.entryType || '').toLowerCase();
+        const invoiceEntry = !type || type.includes('invoice') || type.includes('sale');
+        if (matchesInvoice && sameCustomer && invoiceEntry) batch.delete(d.ref);
+      });
+
+      // If receipts store bill allocations, release only this invoice allocation.
+      // The receipt itself and its total payment remain untouched.
+      const receiptSnap = await getDocs(query(
+        collection(db, 'receipts'), where('customerId', '==', selectedCustomerId)
+      ));
+      receiptSnap.docs.forEach(d => {
+        const data = d.data();
+        const patch = {};
+        ['allocations', 'billAllocations'].forEach(key => {
+          if (Array.isArray(data[key])) {
+            const next = data[key].filter(a =>
+              String(a.invoiceId || '') !== String(invoiceId) &&
+              String(a.invoiceNumber || a.invoiceNo || a.ref || '') !== String(invoiceNumber)
+            );
+            if (next.length !== data[key].length) patch[key] = next;
+          }
+        });
+        if (Object.keys(patch).length) batch.update(d.ref, patch);
+      });
+
+      const cancellationRef = doc(collection(db, 'cancellations'));
+      batch.set(cancellationRef, cancellation);
+      await batch.commit();
+
+      setCancellations(prev => [{ id: cancellationRef.id, ...cancellation }, ...prev]);
+      setCustomerInvoices(prev => prev.filter(i => i.id !== invoiceId));
+      setInvoiceDetails(null);
+      setRefundData(emptyRefund());
+      setSuccess(
+        `Invoice ${invoiceNumber} cancelled. Its invoice record and matching invoice-ledger entry were deleted. Existing receipts were preserved.`
+      );
+    } catch (e) {
+      console.error('Cancellation failed:', e);
+      setError(e.message || 'Cancellation failed. No changes were confirmed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generatePdf = cancellation => {
+    const pdf = new jsPDF();
+    pdf.setFillColor(13, 71, 161);
+    pdf.rect(0, 0, 210, 38, 'F');
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(21);
+    pdf.text('TRAVELWINGS', 14, 16);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(10);
+    pdf.text('CANCELLATION & REFUND RECORD', 14, 24);
+    pdf.setFontSize(8);
+    pdf.text('H.O: FF8, First Floor, Parsan Samruthi Mahal, Opp. Fathima College, MADURAI - 18', 14, 30);
+    pdf.text('B.O: 40, Vinayagar Koil St., Vinayagapuram, Opp. Lakshmi Narasimmar Temple, RED HILLS, CHENNAI - 600 099', 14, 34);
+    pdf.text('Email: twlixm2@gmail.com  |  Phone: 7200266119', 196, 30, { align: 'right' });
+    pdf.setTextColor(0, 0, 0);
+    pdf.setFontSize(11);
+    const rows = [
+      ['Cancellation ID', cancellation.id || ''],
+      ['Invoice Number', cancellation.invoiceNumber || ''],
+      ['Customer', cancellation.customerName || ''],
+      ['Cancellation Date', cancellation.refundDate || ''],
+      ['Original Invoice Amount', formatCurrency(cancellation.originalAmount)],
+      ['Refund Amount', formatCurrency(cancellation.refundAmount)],
+      ['Cancellation Charges', formatCurrency(cancellation.cancellationCharges)],
+      ['Net Refund', formatCurrency(cancellation.netRefundAmount)],
+      ['Payment Method', cancellation.paymentMethod || 'N/A'],
+      ['Reason', cancellation.refundReason || 'Not specified'],
+      ['Remarks', cancellation.remarks || '']
+    ];
+    pdf.autoTable({
+      startY: 45,
+      head: [['Cancellation Information', 'Details']],
+      body: rows,
+      theme: 'grid',
+      styles: { fontSize: 10, cellPadding: 3 },
+      headStyles: { fillColor: [25, 75, 130] },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 65 } }
+    });
+    const y = pdf.lastAutoTable.finalY + 10;
+    pdf.autoTable({
+      startY: y,
+      head: [['Financial Summary', 'Amount (INR)']],
+      body: [
+        ['Original Invoice Amount', Number(cancellation.originalAmount || 0).toFixed(2)],
+        ['Refund Amount', Number(cancellation.refundAmount || 0).toFixed(2)],
+        ['Cancellation Charges', Number(cancellation.cancellationCharges || 0).toFixed(2)],
+        ['Net Refund Payable', Number(cancellation.netRefundAmount || 0).toFixed(2)]
+      ],
+      theme: 'grid',
+      styles: { fontSize: 10, cellPadding: 3 },
+      headStyles: { fillColor: [25, 75, 130] },
+      columnStyles: { 1: { halign: 'right' } },
+      foot: [['Status', 'CANCELLED']]
+    });
+    pdf.save(`Cancellation_${cancellation.invoiceNumber || 'Record'}.pdf`);
+  };
+
+  const deleteCancellationRecord = async id => {
+    if (!window.confirm('Delete this cancellation history record? This does not restore the deleted invoice.')) return;
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, 'cancellations', id));
+      setCancellations(p => p.filter(x => x.id !== id));
+      setSuccess('Cancellation history record deleted. The invoice remains cancelled.');
+    } catch (e) {
+      console.error(e);
+      setError('Unable to delete cancellation history record.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const historyFiltered = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return cancellations;
+    return cancellations.filter(c =>
+      String(c.customerName || '').toLowerCase().includes(q) ||
+      String(c.invoiceNumber || '').toLowerCase().includes(q)
+    );
+  }, [cancellations, customerSearch]);
+
   return (
-    <Box sx={{ maxWidth: 1400, margin: '0 auto', pb: 4 }}>
-      
-      {/* ─── HERO BANNER ─── */}
+    <Box sx={{ maxWidth: 1400, mx: 'auto', pb: 4 }}>
       <Box sx={{
         position: 'relative', borderRadius: 3, overflow: 'hidden', mb: 4, px: 4, py: 2.5,
-        display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: 120,
-        background: 'linear-gradient(90deg, #e3f2fd 0%, #bbdefb 100%)',
+        minHeight: 120, background: 'linear-gradient(90deg, #e3f2fd 0%, #bbdefb 100%)'
       }}>
-        <Box sx={{
-          position: 'absolute', right: 0, top: 0, bottom: 0, width: '70%',
-          backgroundImage: "url('/travel-banner.png.png')",
-          backgroundSize: 'cover', backgroundPosition: 'center right',
-          maskImage: 'linear-gradient(to right, transparent 0%, black 40%)',
-          WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%)',
-        }} />
-
-        <Box sx={{ zIndex: 1, maxWidth: '60%' }}>
-          <Typography variant="h4" fontWeight="800" color="#0d47a1" gutterBottom>
-            Cancellations & Refunds
-          </Typography>
-          <Typography variant="subtitle1" color="#424242" fontWeight="500">
-            Manage invoice cancellations, process refunds, and track adjustments.
-          </Typography>
-        </Box>
+        <Typography variant="h4" fontWeight="800" color="#0d47a1" gutterBottom>
+          TRAVELWINGS
+        </Typography>
+        <Typography variant="h5" fontWeight="700" color="#173b68" gutterBottom>
+          Cancellations & Refunds
+        </Typography>
+        <Typography color="#424242">
+          Search customers, select an invoice and process cancellation with a clear refund summary.
+        </Typography>
+        <Divider sx={{ my: 1.5 }} />
+        <Typography variant="caption" color="text.secondary" display="block">
+          H.O: FF8, First Floor, Parsan Samruthi Mahal, Opp. Fathima College, MADURAI - 18
+        </Typography>
+        <Typography variant="caption" color="text.secondary" display="block">
+          B.O: 40, Vinayagar Koil St., Vinayagapuram, Opp. Lakshmi Narasimmar Temple, RED HILLS, CHENNAI - 600 099
+        </Typography>
+        <Typography variant="caption" color="text.secondary" display="block">
+          Email: twlixm2@gmail.com  |  Phone: 7200266119
+        </Typography>
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
-      {/* ─── SEARCH SECTION ─── */}
       <Paper elevation={0} sx={{ p: 4, mb: 4, borderRadius: 3, border: '1px solid #e0e0e0' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Box display="flex" alignItems="center" gap={2}>
-            <Avatar sx={{ bgcolor: '#1976d2', width: 56, height: 56 }}>
-              <Search fontSize="large" />
-            </Avatar>
-            <Box>
-              <Typography variant="h5" fontWeight="bold">
-                {editingCancellation ? 'Edit Cancellation' : 'Search Invoice'}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Enter an invoice number to process a cancellation or refund
-              </Typography>
-            </Box>
+        <Box display="flex" alignItems="center" gap={2} mb={3}>
+          <Avatar sx={{ bgcolor: '#1976d2', width: 54, height: 54 }}><Person /></Avatar>
+          <Box>
+            <Typography variant="h5" fontWeight="bold">Find Customer & Invoice</Typography>
+            <Typography variant="body2" color="text.secondary">Search by customer name, phone, email or invoice number</Typography>
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <Box sx={{ flexGrow: 1 }}>
-            <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <Receipt fontSize="small" color="primary" /> Invoice Number
-            </Typography>
+        <Grid container spacing={3}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <TextField
-              fullWidth
-              value={invoiceNumber}
-              onChange={(e) => setInvoiceNumber(e.target.value)}
-              placeholder="e.g., TM-2024-0001"
-              disabled={loading || !!editingCancellation}
+              fullWidth label="Search customer" value={customerSearch}
+              onChange={e => setCustomerSearch(e.target.value)}
+              placeholder="Type customer name, phone or email"
               sx={inputStyle}
+              InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }}
             />
-          </Box>
-          
-          {!editingCancellation ? (
-            <Button
-              variant="contained"
-              onClick={handleSearch}
-              startIcon={<Search />}
-              disabled={loading || !invoiceNumber.trim()}
-              sx={{ textTransform: 'none', bgcolor: '#1976d2', height: 56, px: 4 }}
+            <TextField
+              select fullWidth label="Select customer" value={selectedCustomerId}
+              onChange={handleCustomerSelect} sx={{ ...inputStyle, mt: 2 }}
             >
-              {loading ? 'Searching...' : 'Search'}
-            </Button>
-          ) : (
-            <Button
-              variant="outlined"
-              color="warning"
-              onClick={() => {
-                setEditingCancellation(null); setInvoiceNumber(''); setInvoiceDetails(null); setError('');
-                setRefundData({ refundAmount: '', refundReason: '', refundDate: new Date().toISOString().split('T')[0], remarks: '', paymentMethod: '', cancellationCharges: '' });
+              <MenuItem value="">Choose customer</MenuItem>
+              {filteredCustomers.map(c => (
+                <MenuItem key={c.id} value={c.id}>
+                  {c.name || 'Unnamed'} {c.phone ? `— ${c.phone}` : ''}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          <Grid size={{ xs: 12, md: 6 }}>
+            <TextField
+              fullWidth label="Search invoice number" value={invoiceSearch}
+              onChange={e => setInvoiceSearch(e.target.value)}
+              placeholder="Filter this customer's active invoices"
+              disabled={!selectedCustomerId} sx={inputStyle}
+              InputProps={{ startAdornment: <InputAdornment position="start"><Receipt /></InputAdornment> }}
+            />
+            <TextField
+              select fullWidth label="Select invoice" value={invoiceDetails?.id || ''}
+              onChange={e => {
+                const found = customerInvoices.find(i => i.id === e.target.value);
+                if (found) selectInvoice(found);
               }}
-              sx={{ textTransform: 'none', height: 56, px: 4 }}
+              disabled={!selectedCustomerId} sx={{ ...inputStyle, mt: 2 }}
             >
-              Cancel Edit
-            </Button>
-          )}
-        </Box>
+              <MenuItem value="">Choose active invoice</MenuItem>
+              {filteredInvoices.map(i => (
+                <MenuItem key={i.id} value={i.id}>
+                  {i.invoiceNumber || i.id} — {formatCurrency(i.totalAmount ?? i.ticketPrice)} — {i.date || 'No date'}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+        </Grid>
+
+        {selectedCustomer && (
+          <Alert severity="info" sx={{ mt: 3 }}>
+            Selected customer: <b>{selectedCustomer.name}</b> · {customerInvoices.length} active invoice(s)
+          </Alert>
+        )}
       </Paper>
 
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', my: 4 }}>
-          <CircularProgress />
-        </Box>
-      )}
+      {loading && <Box display="flex" justifyContent="center" my={3}><CircularProgress /></Box>}
 
-      {/* ─── FORM SECTION ─── */}
-      {(invoiceDetails || editingCancellation) && !loading && (
+      {invoiceDetails && !loading && (
         <Paper elevation={0} sx={{ p: 4, mb: 4, borderRadius: 3, border: '1px solid #e0e0e0' }}>
-          
-          {/* Invoice Details Info Box */}
-          <Box sx={{ mb: 4, p: 3, bgcolor: '#f8fafc', borderRadius: 2, border: '1px solid #e0e0e0' }}>
-            <Typography variant="h6" fontWeight="bold" mb={2}>Invoice Details</Typography>
-            <Grid container spacing={2}>
-              <Grid size={{ xs: 12, md: 3 }}>
-                <Typography variant="caption" color="text.secondary">Invoice Number</Typography>
-                <Typography fontWeight="bold">{invoiceDetails?.invoiceNumber}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 3 }}>
-                <Typography variant="caption" color="text.secondary">Customer Name</Typography>
-                <Typography fontWeight="bold">{invoiceDetails?.customerName}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 3 }}>
-                <Typography variant="caption" color="text.secondary">Original Amount</Typography>
-                <Typography fontWeight="bold">{formatCurrency(invoiceDetails?.totalAmount || invoiceDetails?.ticketPrice)}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 3 }}>
-                <Typography variant="caption" color="text.secondary">Payment Method</Typography>
-                <Typography fontWeight="bold">{invoiceDetails?.paymentMethod || 'N/A'}</Typography>
-              </Grid>
-            </Grid>
-          </Box>
+          <Typography variant="h5" fontWeight="bold" mb={3}>Cancellation Details</Typography>
+          <Typography variant="subtitle1" fontWeight="bold" mb={1}>Invoice Summary</Typography>
+          <TableContainer component={Paper} variant="outlined" sx={{ mb: 3 }}>
+            <Table size="small">
+              <TableHead sx={{ bgcolor: '#eef3f8' }}>
+                <TableRow>
+                  {['Invoice No.', 'Customer', 'Invoice Date', 'Invoice Amount'].map(h =>
+                    <TableCell key={h} sx={{ fontWeight: 'bold' }}>{h}</TableCell>
+                  )}
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                <TableRow>
+                  <TableCell>{invoiceDetails.invoiceNumber || invoiceDetails.id}</TableCell>
+                  <TableCell>{selectedCustomer?.name || invoiceDetails.customerName || '-'}</TableCell>
+                  <TableCell>{invoiceDetails.date || '-'}</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>{formatCurrency(invoiceDetails.totalAmount ?? invoiceDetails.ticketPrice)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TableContainer>
 
-          <Typography variant="h6" fontWeight="bold" mb={3}>Refund Details</Typography>
-          <Grid container spacing={3}>
-            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <CalendarToday fontSize="small" color="warning" /> Refund Date *
-              </Typography>
-              <TextField name="refundDate" type="date" fullWidth value={refundData.refundDate} onChange={handleInputChange} sx={inputStyle} InputLabelProps={{ shrink: true }} required />
-            </Grid>
+          <Typography variant="subtitle1" fontWeight="bold" mb={1}>Refund & Adjustment Details</Typography>
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small">
+              <TableHead sx={{ bgcolor: '#eef3f8' }}>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 'bold', width: '22%' }}>Particulars</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Entry</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', width: '22%' }}>Particulars</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Entry</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                <TableRow>
+                  <TableCell>Cancellation Date *</TableCell>
+                  <TableCell><TextField fullWidth size="small" type="date" name="refundDate" value={refundData.refundDate} onChange={handleRefundChange} InputLabelProps={{ shrink: true }} sx={inputStyle} /></TableCell>
+                  <TableCell>Refund Amount (₹) *</TableCell>
+                  <TableCell><TextField fullWidth size="small" type="number" name="refundAmount" value={refundData.refundAmount} onChange={handleRefundChange} inputProps={{ min: 0, step: 0.01 }} sx={inputStyle} /></TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Cancellation Charges (₹)</TableCell>
+                  <TableCell><TextField fullWidth size="small" type="number" name="cancellationCharges" value={refundData.cancellationCharges} onChange={handleRefundChange} inputProps={{ min: 0, step: 0.01 }} sx={inputStyle} /></TableCell>
+                  <TableCell>Net Refund (₹)</TableCell>
+                  <TableCell><TextField fullWidth size="small" value={formatCurrency(netRefundAmount)} InputProps={{ readOnly: true }} sx={{ ...inputStyle, bgcolor: '#f0fdf4' }} /></TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Supplier Cancellation Payable (₹)</TableCell>
+                  <TableCell>
+                    <TextField fullWidth size="small" type="number" name="supplierCancellationPayable"
+                      value={refundData.supplierCancellationPayable} onChange={handleRefundChange}
+                      inputProps={{ min: 0, step: 0.01 }} sx={inputStyle}
+                      helperText="Internal backend amount only; not shown on customer PDF/receipt." />
+                  </TableCell>
+                  <TableCell>Payment Method</TableCell>
+                  <TableCell><TextField fullWidth size="small" name="paymentMethod" value={refundData.paymentMethod} onChange={handleRefundChange} placeholder="Cash / Bank / UPI" sx={inputStyle} /></TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell>Cancellation Reason</TableCell>
+                  <TableCell>
+                    <TextField select fullWidth size="small" name="refundReason" value={refundData.refundReason} onChange={handleRefundChange} sx={inputStyle}>
+                      <MenuItem value="">Select reason (optional)</MenuItem>
+                      {['Customer Request', 'Service Not Provided', 'Duplicate Booking', 'Schedule Change', 'Other'].map(x => <MenuItem key={x} value={x}>{x}</MenuItem>)}
+                    </TextField>
+                  </TableCell>
+                  <TableCell>Remarks</TableCell>
+                  <TableCell><TextField fullWidth size="small" multiline minRows={2} name="remarks" value={refundData.remarks} onChange={handleRefundChange} sx={inputStyle} /></TableCell>
+                </TableRow>
+                <TableRow sx={{ bgcolor: '#f8fafc' }}>
+                  <TableCell colSpan={3} align="right" sx={{ fontWeight: 'bold' }}>Net Refund Payable</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold', color: 'error.main', fontSize: '1.05rem' }}>{formatCurrency(netRefundAmount)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TableContainer>
 
-            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <AttachMoney fontSize="small" color="success" /> Refund Amount (₹) *
-              </Typography>
-              <TextField name="refundAmount" type="number" fullWidth value={refundData.refundAmount} onChange={handleInputChange} sx={inputStyle} inputProps={{ min: 0, step: 0.01 }} required />
-            </Grid>
-
-            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Warning fontSize="small" color="error" /> Cancellation Charges (₹)
-              </Typography>
-              <TextField name="cancellationCharges" type="number" fullWidth value={refundData.cancellationCharges} onChange={handleInputChange} sx={inputStyle} inputProps={{ min: 0, step: 0.01 }} />
-            </Grid>
-
-            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <CheckCircle fontSize="small" color="success" /> Net Refund Amount
-              </Typography>
-              <TextField fullWidth value={formatCurrency(netRefundAmount)} disabled sx={{ ...inputStyle, bgcolor: '#e8f5e9' }} InputProps={{ readOnly: true }} />
-            </Grid>
-
-            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Receipt fontSize="small" color="primary" /> Payment Method
-              </Typography>
-              <TextField fullWidth value={refundData.paymentMethod} disabled sx={inputStyle} />
-            </Grid>
-
-            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Warning fontSize="small" color="warning" /> Refund Reason *
-              </Typography>
-              <TextField select fullWidth name="refundReason" value={refundData.refundReason} onChange={handleInputChange} sx={inputStyle} required>
-                <MenuItem value="" disabled><em>Select a reason</em></MenuItem>
-                <MenuItem value="Customer Request">Customer Request</MenuItem>
-                <MenuItem value="Service Not Provided">Service Not Provided</MenuItem>
-                <MenuItem value="Duplicate Payment">Duplicate Payment</MenuItem>
-                <MenuItem value="Other">Other</MenuItem>
-              </TextField>
-            </Grid>
-
-            <Grid size={{ xs: 12 }}>
-              <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Notes fontSize="small" color="info" /> Remarks
-              </Typography>
-              <TextField name="remarks" multiline rows={2} fullWidth value={refundData.remarks} onChange={handleInputChange} sx={inputStyle} />
-            </Grid>
-          </Grid>
-
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
-            <Button variant="outlined" onClick={() => { setEditingCancellation(null); setInvoiceDetails(null); setInvoiceNumber(''); setError(''); }} startIcon={<Clear />} sx={{ textTransform: 'none', borderColor: '#e0e0e0', color: 'text.secondary', px: 3 }}>
-              Clear
-            </Button>
-            <Button variant="contained" color={editingCancellation ? "warning" : "error"} onClick={editingCancellation ? updateCancellation : handleSubmit} startIcon={<Cancel />} disabled={loading} sx={{ textTransform: 'none', px: 4 }}>
-              {loading ? 'Processing...' : editingCancellation ? 'Update Cancellation' : 'Process Refund'}
+          <Alert severity="warning" sx={{ mt: 3 }}>
+            Confirming cancellation permanently deletes this invoice document and its matching invoice entry in Account Ledger. Receipt/payment records are retained so real payments are not erased. A cancellation history record is saved for audit.
+          </Alert>
+          <Box display="flex" justifyContent="flex-end" gap={2} mt={3}>
+            <Button variant="outlined" startIcon={<Clear />} onClick={() => setInvoiceDetails(null)}>Clear invoice</Button>
+            <Button variant="contained" color="error" startIcon={<Cancel />}
+              disabled={loading} onClick={() => { if (validate()) setConfirmOpen(true); }}>
+              Review & Cancel Invoice
             </Button>
           </Box>
         </Paper>
       )}
 
-      {/* ─── HISTORY SECTION ─── */}
       <Paper elevation={0} sx={{ p: 4, borderRadius: 3, border: '1px solid #e0e0e0' }}>
-        <Box display="flex" alignItems="center" gap={2} mb={3}>
-          <Avatar sx={{ bgcolor: '#2e7d32', width: 56, height: 56 }}>
-            <Cancel fontSize="large" />
-          </Avatar>
-          <Box>
-            <Typography variant="h5" fontWeight="bold">Recent Cancellations</Typography>
-            <Typography variant="body2" color="text.secondary">View and manage all processed refunds</Typography>
+        <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2} mb={3}>
+          <Box display="flex" alignItems="center" gap={2}>
+            <Avatar sx={{ bgcolor: '#2e7d32', width: 54, height: 54 }}><Cancel /></Avatar>
+            <Box>
+              <Typography variant="h5" fontWeight="bold">Cancellation History</Typography>
+              <Typography variant="body2" color="text.secondary">Audit trail of cancelled invoices</Typography>
+            </Box>
           </Box>
+          <TextField size="small" label="Search history" value={customerSearch}
+            onChange={e => setCustomerSearch(e.target.value)}
+            placeholder="Customer or invoice number" sx={{ minWidth: 260, ...inputStyle }}
+            InputProps={{ startAdornment: <InputAdornment position="start"><Search /></InputAdornment> }} />
         </Box>
-
         <TableContainer>
           <Table>
             <TableHead sx={{ bgcolor: '#f5f5f5' }}>
               <TableRow>
-                <TableCell sx={{ fontWeight: 'bold' }}>Invoice No.</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Customer</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Refund Date</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }} align="right">Refund Amount (₹)</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
-                <TableCell sx={{ fontWeight: 'bold' }}>Actions</TableCell>
+                {['Invoice No.', 'Customer', 'Date', 'Invoice Amount', 'Refund', 'Charges', 'Net Refund', 'Reason', 'Status', 'Actions'].map(h =>
+                  <TableCell key={h} sx={{ fontWeight: 'bold' }}>{h}</TableCell>
+                )}
               </TableRow>
             </TableHead>
             <TableBody>
-              {cancellations.map((cancellation) => (
-                <TableRow key={cancellation.id} hover>
-                  <TableCell><Typography fontWeight="500">{cancellation.invoiceNumber}</Typography></TableCell>
-                  <TableCell>{cancellation.customerName}</TableCell>
-                  <TableCell>{cancellation.refundDate}</TableCell>
-                  <TableCell align="right" sx={{ fontWeight: 'bold', color: 'error.main' }}>
-                    {formatCurrency(cancellation.netRefundAmount)}
-                  </TableCell>
+              {historyFiltered.map(c => (
+                <TableRow key={c.id} hover>
+                  <TableCell>{c.invoiceNumber}</TableCell>
+                  <TableCell>{c.customerName}</TableCell>
+                  <TableCell>{c.refundDate}</TableCell>
+                  <TableCell>{formatCurrency(c.originalAmount)}</TableCell>
+                  <TableCell>{formatCurrency(c.refundAmount)}</TableCell>
+                  <TableCell>{formatCurrency(c.cancellationCharges)}</TableCell>
+                  <TableCell sx={{ color: 'error.main', fontWeight: 'bold' }}>{formatCurrency(c.netRefundAmount)}</TableCell>
+                  <TableCell>{c.refundReason}</TableCell>
+                  <TableCell><Typography variant="caption" sx={{ color: 'success.main', fontWeight: 'bold' }}>{String(c.status || 'completed').toUpperCase()}</Typography></TableCell>
                   <TableCell>
-                    <Typography variant="caption" sx={{ bgcolor: '#e8f5e9', color: '#2e7d32', px: 1, py: 0.5, borderRadius: 1, fontWeight: 'bold' }}>
-                      Completed
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Tooltip title="Generate PDF">
-                      <IconButton onClick={() => generatePdf(cancellation)} color="primary" size="small"><PictureAsPdf fontSize="small" /></IconButton>
+                    <Tooltip title="Export cancellation PDF">
+                      <IconButton color="primary" size="small" onClick={() => generatePdf(c)}><PictureAsPdf /></IconButton>
                     </Tooltip>
-                    <Tooltip title="Edit">
-                      <IconButton onClick={() => handleEdit(cancellation)} color="warning" size="small"><Edit fontSize="small" /></IconButton>
-                    </Tooltip>
-                    <Tooltip title="Delete">
-                      <IconButton onClick={() => handleDelete(cancellation.id)} color="error" size="small"><Delete fontSize="small" /></IconButton>
+                    <Tooltip title="Delete history only">
+                      <IconButton color="error" size="small" onClick={() => deleteCancellationRecord(c.id)}><Delete /></IconButton>
                     </Tooltip>
                   </TableCell>
                 </TableRow>
               ))}
-              {cancellations.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
-                    <Typography color="textSecondary">No cancellations found</Typography>
-                  </TableCell>
-                </TableRow>
+              {!historyFiltered.length && (
+                <TableRow><TableCell colSpan={10} align="center">No cancellation records found.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
         </TableContainer>
       </Paper>
 
-      {/* ─── CONFIRM DIALOG ─── */}
-      <Dialog open={openConfirmDialog} onClose={() => setOpenConfirmDialog(false)}>
-        <DialogTitle>Confirm Refund</DialogTitle>
+      <Dialog open={confirmOpen} onClose={() => !loading && setConfirmOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Confirm invoice cancellation</DialogTitle>
         <DialogContent>
-          <Typography gutterBottom><b>Invoice:</b> {invoiceDetails?.invoiceNumber || 'N/A'}</Typography>
-          <Typography gutterBottom><b>Customer:</b> {invoiceDetails?.customerName || 'N/A'}</Typography>
-          <Typography gutterBottom><b>Ticket Price:</b> {formatCurrency(invoiceDetails?.totalAmount || invoiceDetails?.ticketPrice)}</Typography>
-          <Typography gutterBottom><b>Cancellation Charges:</b> {formatCurrency(refundData.cancellationCharges)}</Typography>
-          <Typography fontWeight="bold" mt={2} color="error.main" variant="h6">
-            Net Refund Amount: {formatCurrency(netRefundAmount)}
+          <Typography gutterBottom>Customer: <b>{selectedCustomer?.name}</b></Typography>
+          <Typography gutterBottom>Invoice: <b>{invoiceDetails?.invoiceNumber}</b></Typography>
+          <Typography gutterBottom>Original amount: <b>{formatCurrency(invoiceDetails?.totalAmount ?? invoiceDetails?.ticketPrice)}</b></Typography>
+          <Typography gutterBottom>Refund: <b>{formatCurrency(refundData.refundAmount)}</b></Typography>
+          <Typography gutterBottom>Cancellation charges: <b>{formatCurrency(refundData.cancellationCharges)}</b></Typography>
+          <Typography color="error" fontWeight="bold" mt={2}>
+            This permanently deletes the invoice and its invoice-ledger entry. This action cannot be undone.
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenConfirmDialog(false)}>Cancel</Button>
-          <Button onClick={confirmRefund} color="error" variant="contained" startIcon={<CheckCircle />}>
-            Confirm Refund
+          <Button onClick={() => setConfirmOpen(false)} disabled={loading}>Go Back</Button>
+          <Button onClick={processCancellation} color="error" variant="contained"
+            startIcon={<CheckCircle />} disabled={loading}>
+            Confirm & Delete Invoice
           </Button>
         </DialogActions>
       </Dialog>

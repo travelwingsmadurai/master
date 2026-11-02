@@ -1,7 +1,8 @@
-// src/pages/Invoice.js — Direct WhatsApp Chat & QR
+// src/pages/Invoice.js — Cloudinary Invoice Document Upload
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { addDoc, collection, getDocs, doc, updateDoc, deleteDoc, query, orderBy, runTransaction } from 'firebase/firestore';
 import { db } from '../config/firebase';
+import { uploadInvoice } from '../cloudinaryUpload';
 import { useReactToPrint } from 'react-to-print';
 import { format } from 'date-fns';
 import { jsPDF } from 'jspdf';
@@ -9,14 +10,14 @@ import 'jspdf-autotable';
 import {
   TextField, Button, Typography, Box, Table, TableBody,
   TableCell, TableContainer, TableHead, TableRow, Paper, Select,
-  MenuItem, InputLabel, FormControl, Grid, CircularProgress, Alert,
-  Menu, ListItemIcon, ListItemText, Dialog, DialogTitle, DialogContent,
-  DialogActions, IconButton, Chip, Avatar, Divider, Tooltip
+  MenuItem, FormControl, Grid, CircularProgress, Alert,
+  Dialog, DialogTitle, DialogContent, DialogActions,
+  IconButton, Chip, Avatar, Divider, Tooltip
 } from '@mui/material';
-import { 
-  Print, PictureAsPdf, MoreVert, Edit, Delete, PersonAdd, Person, Add, 
+import {
+  Print, PictureAsPdf, Edit, Delete, PersonAdd, Person, Add,
   Receipt, CalendarToday, Flight, AttachMoney, Business, Group, Clear,
-  WhatsApp 
+  Search as SearchIcon, CloudUpload, Download // Changed Description to Download
 } from '@mui/icons-material';
 
 // ──────────────────────────── Helpers ────────────────────────────
@@ -99,14 +100,23 @@ const PrintableInvoice = React.forwardRef(({ invoice }, ref) => {
   const items = getDisplayItems(invoice);
 
   return (
-    <div ref={ref} style={{
-      padding: '20px', fontFamily: 'Arial', width: '210mm',
-      margin: '0 auto', backgroundColor: 'white'
-    }}>
-      <h2 style={{ textAlign: 'center', marginBottom: '5px' }}>TRAVELWINGS</h2>
-      <p style={{ textAlign: 'center', marginTop: '0', color: '#555' }}>
-        F56 PARASAN SAMUDHRI MAHAL, OPP FATHIMA COLLEGE<br />MADURAI
-      </p>
+    <div
+      id="printable-invoice"
+      ref={ref}
+      style={{
+        padding: '20px', fontFamily: 'Arial', width: '190mm',
+        boxSizing: 'border-box', margin: '0 auto', backgroundColor: 'white', color: '#000'
+      }}
+    >
+      <div style={{ position: 'relative', minHeight: '80px' }}>
+        <img src="/logo.jpg" alt="Logo" style={{ position: 'absolute', top: 0, right: 0, height: '70px', objectFit: 'contain' }} />
+        <h2 style={{ textAlign: 'center', marginBottom: '5px', paddingTop: '10px' }}>TRAVELWINGS</h2>
+        <div style={{ textAlign: 'center', marginTop: '0', color: '#555', fontSize: '10px', lineHeight: 1.45 }}>
+          <div><strong>H.O:</strong> FF8, First Floor, Parsan Samruthi Mahal, Opp. Fathima College, MADURAI - 18.</div>
+          <div><strong>B.O:</strong> 40, Vinayagar Koil St., Vinayagapuram, Opp. Lakshmi Narasimmar Temple, RED HILLS, CHENNAI - 600 099.</div>
+          <div>Email: twlixm2@gmail.com | Phone: 7200266119</div>
+        </div>
+      </div>
 
       <div style={{ textAlign: 'center', margin: '20px 0', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
         <h3 style={{ margin: '5px 0' }}>INVOICE</h3>
@@ -126,7 +136,7 @@ const PrintableInvoice = React.forwardRef(({ invoice }, ref) => {
       </table>
 
       <div style={{ margin: '15px 0' }}>
-        <p style={{ fontWeight: 'bold', marginBottom: '5px' }}>Billed To:</p>
+        <p style={{ fontWeight: 'bold', marginBottom: '5px' }}>Customer Name:</p>
         <p style={{ fontWeight: 'bold', fontSize: '1.1em' }}>{invoice.customerName}</p>
       </div>
 
@@ -185,18 +195,34 @@ const PrintableInvoice = React.forwardRef(({ invoice }, ref) => {
         <p><strong>Amount in Words:</strong> {numberToWords(invoice.totalAmount)}</p>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: '30px' }}>
-        <div>
-          <p style={{ fontStyle: 'italic', fontSize: '12px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginTop: '30px' }}>
+        
+        <div style={{ fontSize: '12px', flex: 1 }}>
+          <p style={{ fontStyle: 'italic', marginBottom: '8px' }}>
             *(Bank Transfer Subject to Realisation)*
           </p>
-          <p style={{ fontSize: '12px', marginTop: '10px' }}><strong>Scan to pay via UPI:</strong></p>
-          <img src="/QR.jpeg" alt="UPI QR" style={{ width: '120px', height: '120px', border: '1px solid #ccc', padding: '5px', borderRadius: '8px' }} />
+          <table style={{ fontSize: '12px', borderCollapse: 'collapse' }}>
+            <tbody>
+              <tr><td style={{ padding: '2px 8px 2px 0' }}><strong>AC No</strong></td><td style={{ padding: '2px 0' }}>: 42719516722</td></tr>
+              <tr><td style={{ padding: '2px 8px 2px 0' }}><strong>AC Name</strong></td><td style={{ padding: '2px 0' }}>: Travel wings</td></tr>
+              <tr><td style={{ padding: '2px 8px 2px 0' }}><strong>Bank</strong></td><td style={{ padding: '2px 0' }}>: SBI Bank</td></tr>
+              <tr><td style={{ padding: '2px 8px 2px 0' }}><strong>Branch</strong></td><td style={{ padding: '2px 0' }}>: Andalpuram</td></tr>
+              <tr><td style={{ padding: '2px 8px 2px 0' }}><strong>City</strong></td><td style={{ padding: '2px 0' }}>: Madurai</td></tr>
+              <tr><td style={{ padding: '2px 8px 2px 0' }}><strong>IFS Code</strong></td><td style={{ padding: '2px 0' }}>: SBIN 0018158</td></tr>
+              <tr><td style={{ padding: '2px 8px 2px 0' }}><strong>GPAY No</strong></td><td style={{ padding: '2px 0' }}>: 72 00266119</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <p style={{ fontSize: '12px', marginBottom: '8px' }}><strong>Scan to pay via UPI</strong></p>
+          <img src="/QR.jpeg" alt="UPI QR" style={{ width: '100px', height: '100px', border: '1px solid #ccc', padding: '5px', borderRadius: '8px' }} />
         </div>
         
-        <div style={{ textAlign: 'right' }}>
-          <p>For "TRAVELWINGS"</p>
-          <p style={{ marginTop: '40px' }}>Authorised Signatory</p>
+        <div style={{ textAlign: 'right', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+          <p style={{ margin: 0 }}>For "TRAVELWINGS"</p>
+          <img src="/signature.png" alt="Signature" style={{ height: '60px', objectFit: 'contain', margin: '10px 0' }} />
+          <p style={{ margin: 0 }}>Authorised Signatory</p>
         </div>
       </div>
     </div>
@@ -219,7 +245,12 @@ const Invoice = () => {
     handlingCharge: '',
     airlineName: '',
     passengers: [],
-    additionalItems: []
+    additionalItems: [],
+    docData: '', // Legacy Base64 attachment support
+    docName: '',
+    docUrl: '',
+    docPublicId: '',
+    docResourceType: ''
   });
 
   const [items, setItems] = useState([emptyItem()]);
@@ -229,9 +260,9 @@ const Invoice = () => {
   const [invoices, setInvoices] = useState([]);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isUploadingDocument, setIsUploadingDocument] = useState(false);
   const [printInvoice, setPrintInvoice] = useState(null);
   const [error, setError] = useState(null);
-  const [anchorEl, setAnchorEl] = useState(null);
   const [currentInvoice, setCurrentInvoice] = useState(null);
   const [editing, setEditing] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -240,13 +271,49 @@ const Invoice = () => {
   const [showPassengerForm, setShowPassengerForm] = useState(false);
   const [showItemForm, setShowItemForm] = useState(false);
 
+  // Base64 states for PDF generation
+  const [logoBase64, setLogoBase64] = useState(null);
+  const [qrBase64, setQrBase64] = useState(null);
+  const [signatureBase64, setSignatureBase64] = useState(null);
+
+  // ── Quick-add Customer / Supplier dialogs ──
+  const [customerDialogOpen, setCustomerDialogOpen] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', email: '' });
+  const [supplierDialogOpen, setSupplierDialogOpen] = useState(false);
+  const [newSupplier, setNewSupplier] = useState({ name: '', supplierType: '', phone: '' });
+
+  // ── Search ──
+  const [searchTerm, setSearchTerm] = useState('');
+
   const invoiceRef = useRef();
   const formRef = useRef();
+  const printTimeoutRef = useRef(null);
 
   const customersCollectionRef = collection(db, 'customers');
   const staffCollectionRef = collection(db, 'staff');
   const suppliersCollectionRef = collection(db, 'suppliers');
   const invoicesCollectionRef = collection(db, 'invoices');
+
+  // Load images for PDF safely
+  useEffect(() => {
+    const loadImage = async (path, setter) => {
+      try {
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const blob = await res.blob();
+        if (!blob.type.startsWith('image/')) throw new Error('File is not an image');
+        
+        const reader = new FileReader();
+        reader.onloadend = () => setter(reader.result);
+        reader.readAsDataURL(blob);
+      } catch (err) {
+        console.warn(`Failed to load image for PDF: ${path}`, err.message);
+      }
+    };
+    loadImage('/logo.jpg', setLogoBase64);
+    loadImage('/QR.jpeg', setQrBase64);
+    loadImage('/signature.png', setSignatureBase64);
+  }, []);
 
   const generateInvoiceNumber = async () => {
     const year = new Date().getFullYear();
@@ -276,8 +343,7 @@ const Invoice = () => {
     const additionalTotal = formData.additionalItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
     const handling = parseFloat(formData.handlingCharge) || 0;
     const invoiceTotal = itemsSellingTotal + handling + additionalTotal;
-    const profit = invoiceTotal - itemsProviderTotal;
-    return { itemsSellingTotal, itemsProviderTotal, additionalTotal, handling, invoiceTotal, profit };
+    return { itemsSellingTotal, itemsProviderTotal, additionalTotal, handling, invoiceTotal };
   }, [items, formData.additionalItems, formData.handlingCharge]);
 
   useEffect(() => {
@@ -307,6 +373,15 @@ const Invoice = () => {
 
   const activeCustomers = customers.filter(c => c.isActive !== false || c.id === formData.customerId);
   const activeSuppliers = suppliers.filter(s => s.isActive !== false || s.id === formData.supplierId);
+
+  const filteredInvoices = useMemo(() => {
+    if (!searchTerm.trim()) return invoices;
+    const term = searchTerm.trim().toLowerCase();
+    return invoices.filter(inv =>
+      (inv.customerName || '').toLowerCase().includes(term) ||
+      (inv.invoiceNumber || '').toLowerCase().includes(term)
+    );
+  }, [invoices, searchTerm]);
 
   const handleCustomerChange = (e) => {
     const customerId = e.target.value;
@@ -393,11 +468,144 @@ const Invoice = () => {
     }));
   };
 
+  // ── Quick-add Customer ──
+  const handleSaveNewCustomer = async () => {
+    if (!newCustomer.name.trim()) return;
+    try {
+      const docRef = await addDoc(customersCollectionRef, {
+        name: newCustomer.name.trim(),
+        phone: newCustomer.phone.trim(),
+        email: newCustomer.email.trim(),
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+      const created = {
+        id: docRef.id,
+        name: newCustomer.name.trim(),
+        phone: newCustomer.phone.trim(),
+        email: newCustomer.email.trim(),
+        isActive: true
+      };
+      setCustomers(prev => [...prev, created]);
+      setSelectedCustomer(created);
+      setFormData(prev => ({ ...prev, customerId: docRef.id }));
+      setNewCustomer({ name: '', phone: '', email: '' });
+      setCustomerDialogOpen(false);
+      setError({ message: 'Customer added successfully!', severity: 'success' });
+    } catch (err) {
+      console.error('Add customer failed:', err);
+      setError('Failed to add customer. Please try again.');
+    }
+  };
+
+  // ── Quick-add Supplier ──
+  const handleSaveNewSupplier = async () => {
+    if (!newSupplier.name.trim()) return;
+    try {
+      const docRef = await addDoc(suppliersCollectionRef, {
+        name: newSupplier.name.trim(),
+        supplierType: newSupplier.supplierType.trim(),
+        phone: newSupplier.phone.trim(),
+        isActive: true,
+        createdAt: new Date().toISOString()
+      });
+      const created = {
+        id: docRef.id,
+        name: newSupplier.name.trim(),
+        supplierType: newSupplier.supplierType.trim(),
+        phone: newSupplier.phone.trim(),
+        isActive: true
+      };
+      setSuppliers(prev => [...prev, created]);
+      setFormData(prev => ({
+        ...prev,
+        supplierId: docRef.id,
+        airlineName: created.name
+      }));
+      setNewSupplier({ name: '', supplierType: '', phone: '' });
+      setSupplierDialogOpen(false);
+      setError({ message: 'Supplier added successfully!', severity: 'success' });
+    } catch (err) {
+      console.error('Add supplier failed:', err);
+      setError('Failed to add supplier. Please try again.');
+    }
+  };
+
+  // ── Cloudinary document upload ──
+  const handleDocUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png'];
+    if (!allowedTypes.includes(file.type)) {
+      setError('Only PDF, JPG and PNG files are allowed.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File size exceeds 10 MB. Please choose a smaller file.');
+      e.target.value = '';
+      return;
+    }
+
+    setIsUploadingDocument(true);
+    setError(null);
+    try {
+      const result = await uploadInvoice(file);
+      if (!result?.secure_url || !result?.public_id) {
+        throw new Error('Cloudinary did not return a valid file URL.');
+      }
+
+      setFormData(prev => ({
+        ...prev,
+        docData: '',
+        docName: file.name,
+        docUrl: result.secure_url,
+        docPublicId: result.public_id,
+        docResourceType: result.resource_type || (file.type === 'application/pdf' ? 'raw' : 'image')
+      }));
+      setError({ message: 'Document uploaded to Cloudinary successfully!', severity: 'success' });
+    } catch (err) {
+      console.error('Cloudinary upload failed:', err);
+      setError(err.message || 'Failed to upload document to Cloudinary.');
+    } finally {
+      setIsUploadingDocument(false);
+      e.target.value = '';
+    }
+  };
+
+  // ── Download/open invoice attachment ──
+  const downloadDocument = (docUrl, docName, legacyDocData) => {
+    if (docUrl) {
+      const link = document.createElement('a');
+      link.href = docUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.download = docName || 'Invoice-Document';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      return;
+    }
+
+    // Support older invoices that still contain Base64 attachments.
+    if (legacyDocData) {
+      const link = document.createElement('a');
+      link.href = legacyDocData;
+      link.download = docName || 'Invoice-Document';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
   const resetForm = async () => {
     setFormData({
       customerId: '', staffId: '', supplierId: '',
       date: format(new Date(), 'yyyy-MM-dd'),
-      handlingCharge: '', airlineName: '', passengers: [], additionalItems: []
+      handlingCharge: '', airlineName: '', passengers: [], additionalItems: [],
+      docData: '', docName: '', docUrl: '', docPublicId: '', docResourceType: ''
     });
     setItems([emptyItem()]);
     setItemForm({ description: '', amount: '' });
@@ -409,7 +617,7 @@ const Invoice = () => {
     setShowPassengerForm(false);
     setShowItemForm(false);
     setError(null);
-    
+
     const nextNum = await generateInvoiceNumber();
     setNextInvoiceNumber(nextNum);
   };
@@ -444,7 +652,6 @@ const Invoice = () => {
     const additionalTotal = formData.additionalItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
     const handling = parseFloat(formData.handlingCharge) || 0;
     const invoiceTotal = itemsSellingTotal + handling + additionalTotal;
-    const profit = invoiceTotal - itemsProviderTotal;
 
     setLoading(true);
     try {
@@ -452,7 +659,7 @@ const Invoice = () => {
       const invoiceData = {
         customerId: formData.customerId,
         customerName: selectedCustomer?.name || '',
-        customerPhone: selectedCustomer?.phone || '', 
+        customerPhone: selectedCustomer?.phone || '',
         staffId: formData.staffId || '',
         staffName: selectedStaff?.name || '',
         supplierId: formData.supplierId || '',
@@ -469,10 +676,15 @@ const Invoice = () => {
         airlinePayable: Number(itemsProviderTotal.toFixed(2)),
         ticketCount: cleanItems.length,
         totalAmount: Number(invoiceTotal.toFixed(2)),
-        profit: Number(profit.toFixed(2)),
         status: editing ? (currentInvoice.status || 'active') : 'active',
         createdAt: editing ? (currentInvoice.createdAt || nowISO) : nowISO,
-        updatedAt: nowISO
+        updatedAt: nowISO,
+        // Keep legacy Base64 data for existing attachments; new uploads use Cloudinary.
+        docData: formData.docData || '',
+        docName: formData.docName || '',
+        docUrl: formData.docUrl || '',
+        docPublicId: formData.docPublicId || '',
+        docResourceType: formData.docResourceType || ''
       };
 
       if (editing && currentInvoice) {
@@ -488,7 +700,7 @@ const Invoice = () => {
       await resetForm();
     } catch (err) {
       console.error('Error saving invoice:', err);
-      setError(`Failed to ${editing ? 'update' : 'save'} invoice. Please try again.`);
+      setError(`Failed to ${editing ? 'update' : 'save'} invoice. File might be too large.`);
     } finally {
       setLoading(false);
     }
@@ -506,7 +718,12 @@ const Invoice = () => {
       handlingCharge: inv.handlingCharge != null ? String(inv.handlingCharge) : '',
       airlineName: inv.airlineName || '',
       passengers: Array.isArray(inv.passengers) ? inv.passengers : [],
-      additionalItems: Array.isArray(inv.additionalItems) ? inv.additionalItems : []
+      additionalItems: Array.isArray(inv.additionalItems) ? inv.additionalItems : [],
+      docData: inv.docData || '',
+      docName: inv.docName || '',
+      docUrl: inv.docUrl || '',
+      docPublicId: inv.docPublicId || '',
+      docResourceType: inv.docResourceType || ''
     });
 
     if (Array.isArray(inv.items) && inv.items.length > 0) {
@@ -551,43 +768,87 @@ const Invoice = () => {
     }
   };
 
-  // ─── CORE PDF GENERATION FUNCTION ───
+  const buildPreviewInvoice = () => {
+    const cleanItems = items
+      .map(it => ({
+        serviceType: (it.serviceType || '').trim() || 'Flight',
+        description: (it.description || '').trim(),
+        ticketNumber: (it.ticketNumber || '').trim(),
+        sellingAmount: Math.max(0, parseFloat(it.sellingAmount) || 0),
+        providerCost: Math.max(0, parseFloat(it.providerCost) || 0)
+      }))
+      .filter(it => it.sellingAmount > 0 || it.providerCost > 0 || it.ticketNumber || it.description);
+
+    const itemsSellingTotal = cleanItems.reduce((s, i) => s + i.sellingAmount, 0);
+    const additionalTotal = formData.additionalItems.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+    const handling = parseFloat(formData.handlingCharge) || 0;
+    const invoiceTotal = itemsSellingTotal + handling + additionalTotal;
+
+    return {
+      id: editing ? currentInvoice?.id : 'preview',
+      invoiceNumber: editing ? currentInvoice?.invoiceNumber : (nextInvoiceNumber || 'PREVIEW'),
+      customerId: formData.customerId,
+      customerName: selectedCustomer?.name || '',
+      customerPhone: selectedCustomer?.phone || '',
+      staffId: formData.staffId || '',
+      staffName: selectedStaff?.name || '',
+      supplierId: formData.supplierId || '',
+      airlineName: formData.airlineName || '',
+      date: formData.date,
+      handlingCharge: handling,
+      additionalItems: formData.additionalItems,
+      passengers: formData.passengers,
+      items: cleanItems,
+      ticketType: cleanItems.length === 1 ? cleanItems[0].serviceType : 'Multiple',
+      ticketNumber: cleanItems.length === 1 ? cleanItems[0].ticketNumber : '',
+      ticketPrice: itemsSellingTotal,
+      airlinePayable: 0,
+      ticketCount: cleanItems.length,
+      totalAmount: invoiceTotal
+    };
+  };
+
   const generatePDF = (inv) => {
     if (!inv?.id) { setError('Invalid invoice data'); return null; }
     try {
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
+      try {
+        if (logoBase64) pdf.addImage(logoBase64, 'JPEG', 160, 10, 35, 15);
+      } catch (e) { console.warn('Logo failed', e); }
+
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(16);
       pdf.setTextColor(40);
       pdf.text('TRAVELWINGS', 105, 20, { align: 'center' });
-      pdf.setFontSize(10);
+      pdf.setFontSize(8);
       pdf.setFont('helvetica', 'normal');
-      pdf.text('F56 PARASAN SAMUDHRI MAHAL, OPP FATHIMA COLLEGE', 105, 25, { align: 'center' });
-      pdf.text('MADURAI', 105, 30, { align: 'center' });
+      pdf.text('H.O: FF8, First Floor, Parsan Samruthi Mahal, Opp. Fathima College, MADURAI - 18.', 105, 25, { align: 'center' });
+      pdf.text('B.O: 40, Vinayagar Koil St., Vinayagapuram, Opp. Lakshmi Narasimmar Temple,', 105, 30, { align: 'center' });
+      pdf.text('RED HILLS, CHENNAI - 600 099.', 105, 34, { align: 'center' });
+      pdf.text('Email: twlixm2@gmail.com | Phone: 7200266119', 105, 39, { align: 'center' });
 
       pdf.setFontSize(14);
       pdf.setFont('helvetica', 'bold');
-      pdf.text('INVOICE', 105, 40, { align: 'center' });
+      pdf.text('INVOICE', 105, 49, { align: 'center' });
 
       pdf.setFontSize(12);
       pdf.setFont('helvetica', 'normal');
-      pdf.text(`Invoice No: ${inv.invoiceNumber}`, 20, 50);
-      pdf.text(`Date: ${inv.date}`, 20, 55);
+      pdf.text(`Invoice No: ${inv.invoiceNumber}`, 20, 59);
+      pdf.text(`Date: ${inv.date}`, 20, 64);
 
       pdf.setFont('helvetica', 'bold');
-      pdf.text('Billed To:', 20, 65);
+      pdf.text('Customer Name:', 20, 74);
       pdf.setFont('helvetica', 'normal');
-      pdf.text(inv.customerName || '', 20, 71);
-      
-      let currentY = 76;
+      pdf.text(inv.customerName || '', 20, 80);
+
+      let currentY = 85;
       if (inv.customerPhone) {
         pdf.setFontSize(10);
         pdf.text(`Phone: ${inv.customerPhone}`, 20, currentY);
         currentY += 5;
         pdf.setFontSize(12);
       }
-      pdf.text(`Staff: ${inv.staffName || 'N/A'}`, 20, currentY);
 
       const displayItems = getDisplayItems(inv);
       const tableData = [];
@@ -615,22 +876,38 @@ const Invoice = () => {
         margin: { left: 15 }
       });
 
-      pdf.setFont('helvetica', 'normal');
-      pdf.text(`Amount in Words: ${numberToWords(inv.totalAmount)}`, 20, pdf.lastAutoTable.finalY + 15);
+      const finalY = pdf.lastAutoTable.finalY + 15;
 
-      // ─── ADD QR CODE TO PDF ───
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(`Amount in Words: ${numberToWords(inv.totalAmount)}`, 20, finalY);
+
       pdf.setFont('helvetica', 'italic');
-      pdf.setFontSize(10);
-      pdf.text('*(Bank Transfer Subject to Realisation)*', 20, pdf.lastAutoTable.finalY + 25);
-      
-      pdf.setFont('helvetica', 'bold');
-      pdf.text('Scan to pay via UPI:', 20, pdf.lastAutoTable.finalY + 35);
-      
-      pdf.addImage('/QR.jpeg', 'JPEG', 20, pdf.lastAutoTable.finalY + 40, 35, 35);
+      pdf.setFontSize(9);
+      pdf.text('*(Bank Transfer Subject to Realisation)*', 20, finalY + 10);
 
       pdf.setFont('helvetica', 'normal');
-      pdf.text('For "TRAVELWINGS"', 160, pdf.lastAutoTable.finalY + 60);
-      pdf.text('Authorised Signatory', 160, pdf.lastAutoTable.finalY + 65);
+      pdf.setFontSize(10);
+      const bankY = finalY + 18;
+      pdf.text('AC No        : 42719516722', 20, bankY);
+      pdf.text('AC Name      : Travel wings', 20, bankY + 5);
+      pdf.text('Bank         : SBI Bank', 20, bankY + 10);
+      pdf.text('Branch       : Andalpuram', 20, bankY + 15);
+      pdf.text('City         : Madurai', 20, bankY + 20);
+      pdf.text('IFS Code     : SBIN 0018158', 20, bankY + 25);
+      pdf.text('GPAY No      : 72 00266119', 20, bankY + 30);
+
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('Scan to pay via UPI', 90, bankY);
+      try {
+        if (qrBase64) pdf.addImage(qrBase64, 'JPEG', 90, bankY + 5, 30, 30);
+      } catch (e) { console.warn('QR failed', e); }
+
+      pdf.setFont('helvetica', 'normal');
+      pdf.text('For "TRAVELWINGS"', 150, bankY);
+      try {
+         if (signatureBase64) pdf.addImage(signatureBase64, 'PNG', 145, bankY + 5, 35, 15);
+      } catch (e) { console.warn('Signature failed', e); }
+      pdf.text('Authorised Signatory', 150, bankY + 25);
 
       return pdf;
     } catch (err) {
@@ -640,83 +917,113 @@ const Invoice = () => {
     }
   };
 
-  // ─── EXPORT PDF BUTTON ───
-  const handleExportPDF = useCallback((inv) => {
+  const handleExportPDF = (inv) => {
     setIsExporting(true);
     const pdf = generatePDF(inv);
     if (pdf) {
       pdf.save(`invoice_${inv.invoiceNumber}.pdf`);
     }
     setIsExporting(false);
-  }, []);
+  };
 
-  // ─── WHATSAPP SHARE BUTTON (Downloads PDF + Opens Chat Directly) ───
-  const handleShareWhatsApp = (inv) => {
-    // 1. Download the PDF first
-    const pdf = generatePDF(inv);
-    if (pdf) {
-      pdf.save(`invoice_${inv.invoiceNumber}.pdf`);
-    }
-
-    // 2. Get Phone Number & Clean it
-    const customer = customers.find(c => c.id === inv.customerId);
-    let phone = customer?.phone || inv.customerPhone || '';
-    phone = phone.replace(/\D/g, ''); // Keep only digits
-    
-    // Add India code if it's a 10-digit number
-    if (phone.length === 10) phone = '91' + phone;
-
-    // 3. Prepare Message
-    const text = `*Travel Wings - Invoice*\n\n` +
-                 `Invoice No: *${inv.invoiceNumber}*\n` +
-                 `Date: ${inv.date}\n` +
-                 `Customer: ${inv.customerName}\n` +
-                 `Total Amount: *₹${fmtINR(inv.totalAmount)}*\n\n` +
-                 `(Please find the attached PDF invoice)`;
-
-    // 4. Use setTimeout to ensure download triggers before opening WhatsApp
-    // (Prevents browser from blocking the new tab)
-    setTimeout(() => {
-      const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
-      window.open(url, '_blank');
-      setError({ message: 'PDF Downloaded to your computer. Click the 📎 icon in WhatsApp to attach it.', severity: 'info' });
-    }, 800);
+  const handlePreviewExport = () => {
+    if (!formData.customerId) { setError('Please select a customer first'); return; }
+    const preview = buildPreviewInvoice();
+    if (preview.items.length === 0) { setError('Add at least one service item'); return; }
+    handleExportPDF(preview);
   };
 
   const handlePrint = useReactToPrint({
-    content: () => invoiceRef.current,
-    onBeforeGetContent: () => { setIsPrinting(true); return Promise.resolve(); },
-    onAfterPrint: () => { setIsPrinting(false); setPrintInvoice(null); },
-    pageStyle: `@page { size: A4; margin: 10mm; } @media print { body { margin: 0; padding: 0; } }`
+    contentRef: invoiceRef,
+    documentTitle: `Invoice_${printInvoice?.invoiceNumber || 'TravelWings'}`,
+    onBeforePrint: async () => {
+      if (!invoiceRef.current) throw new Error('Invoice content is not ready for printing');
+    },
+    onAfterPrint: () => {
+      setIsPrinting(false);
+      setPrintInvoice(null);
+      if (printTimeoutRef.current) clearTimeout(printTimeoutRef.current);
+    },
+    onPrintError: (location, error) => {
+      console.error(`Print error (${location}):`, error);
+      setIsPrinting(false);
+      setPrintInvoice(null);
+      setError({ message: `Unable to print invoice: ${error.message || 'Please try again.'}`, severity: 'error' });
+    },
+    pageStyle: `
+      @page { size: A4; margin: 10mm; }
+      @media print {
+        html, body { margin: 0 !important; padding: 0 !important; background: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        body * { visibility: hidden; }
+        #printable-invoice, #printable-invoice * { visibility: visible; }
+        #printable-invoice { position: absolute; left: 0; top: 0; width: 190mm !important; margin: 0 !important; padding: 0 !important; }
+        img { max-width: 100%; }
+      }
+    `
   });
 
   const triggerPrint = useCallback((inv) => {
-    if (!inv?.id) { setError('Invalid invoice data'); return; }
+    if (!inv) { setError('Invalid invoice data'); return; }
+    if (isPrinting) return;
+
     setPrintInvoice(inv);
-    setTimeout(() => {
-      handlePrint().catch(err => { console.error('Print failed:', err); setIsPrinting(false); });
-    }, 300);
-  }, [handlePrint]);
+    setIsPrinting(true);
 
-  const handleMenuOpen = (e, inv) => { setAnchorEl(e.currentTarget); setCurrentInvoice(inv); };
-  const handleMenuClose = () => { setAnchorEl(null); setCurrentInvoice(null); };
-  const handlePrintFromMenu = () => { if (currentInvoice) triggerPrint(currentInvoice); handleMenuClose(); };
-  const handleExportFromMenu = () => { if (currentInvoice) handleExportPDF(currentInvoice); handleMenuClose(); };
+    if (printTimeoutRef.current) clearTimeout(printTimeoutRef.current);
+    printTimeoutRef.current = setTimeout(() => {
+      setIsPrinting(false);
+      setPrintInvoice(null);
+    }, 10000);
+  }, [isPrinting]);
 
-  // ─── Custom Theme Styles ───
+  useEffect(() => {
+    if (!printInvoice || !isPrinting) return;
+    const timer = setTimeout(async () => {
+      try {
+        if (!invoiceRef.current) throw new Error('Printable invoice element not found');
+        await handlePrint();
+      } catch (err) {
+        console.error('Print failed:', err);
+        setIsPrinting(false);
+        setPrintInvoice(null);
+        setError({ message: `Print failed: ${err.message || 'Please check browser settings.'}`, severity: 'error' });
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [printInvoice, isPrinting, handlePrint]);
+
+  const handlePreviewPrint = () => {
+    if (!formData.customerId) { setError('Please select a customer first'); return; }
+    const preview = buildPreviewInvoice();
+    if (preview.items.length === 0) { setError('Add at least one service item'); return; }
+    triggerPrint(preview);
+  };
+
   const inputStyle = {
     '& .MuiOutlinedInput-root': {
       borderRadius: 2,
       backgroundColor: '#fff',
       '& fieldset': { borderColor: '#e0e0e0' },
       '&:hover fieldset': { borderColor: '#1976d2' },
+    },
+    // Hide the browser's up/down spinner arrows in numeric amount fields.
+    '& input[type=number]': {
+      MozAppearance: 'textfield',
+      '&::-webkit-outer-spin-button, &::-webkit-inner-spin-button': {
+        WebkitAppearance: 'none',
+        margin: 0
+      }
     }
+  };
+
+  const addBtnStyle = {
+    bgcolor: '#1976d2', color: '#fff', borderRadius: 2, height: 56,
+    '&:hover': { bgcolor: '#1565c0' }, flexShrink: 0, textTransform: 'none',
+    px: 2, whiteSpace: 'nowrap', minWidth: 'auto'
   };
 
   return (
     <Box sx={{ maxWidth: 1400, margin: '0 auto', pb: 4 }}>
-      
-      {/* ─── HERO BANNER ─── */}
       <Box sx={{
         position: 'relative', borderRadius: 3, overflow: 'hidden', mb: 4, px: 4, py: 2.5,
         display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: 120,
@@ -729,7 +1036,6 @@ const Invoice = () => {
           maskImage: 'linear-gradient(to right, transparent 0%, black 40%)',
           WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%)',
         }} />
-
         <Box sx={{ zIndex: 1, maxWidth: '60%' }}>
           <Typography variant="h4" fontWeight="800" color="#0d47a1" gutterBottom>
             Invoice Management
@@ -746,9 +1052,7 @@ const Invoice = () => {
         </Alert>
       )}
 
-      {/* ─── MAIN FORM CARD ─── */}
       <Paper elevation={0} sx={{ p: 4, mb: 4, borderRadius: 3, border: '1px solid #e0e0e0' }}>
-        
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
           <Box display="flex" alignItems="center" gap={2}>
             <Avatar sx={{ bgcolor: '#1976d2', width: 56, height: 56 }}>
@@ -772,24 +1076,30 @@ const Invoice = () => {
 
         <Box component="form" onSubmit={handleSubmit} ref={formRef}>
           <Grid container spacing={3}>
-            {/* Header Fields */}
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
               <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Person fontSize="small" color="primary" /> Select Customer *
               </Typography>
-              <FormControl fullWidth sx={inputStyle} required>
-                <Select name="customerId" value={formData.customerId} onChange={handleCustomerChange} displayEmpty>
-                  <MenuItem value="" disabled><em>Select a customer</em></MenuItem>
-                  {activeCustomers.map(c => (
-                    <MenuItem key={c.id} value={c.id}>
-                      {c.name}{c.phone ? ` (${c.phone})` : ''}{c.isActive === false ? ' — Inactive' : ''}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <FormControl fullWidth sx={inputStyle} required>
+                    <Select name="customerId" value={formData.customerId} onChange={handleCustomerChange} displayEmpty>
+                      <MenuItem value="" disabled><em>Select a customer</em></MenuItem>
+                      {activeCustomers.map(c => (
+                        <MenuItem key={c.id} value={c.id}>
+                          {c.name}{c.phone ? ` (${c.phone})` : ''}{c.isActive === false ? ' — Inactive' : ''}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Box>
+                <Button variant="contained" onClick={() => setCustomerDialogOpen(true)} sx={addBtnStyle}>
+                  + Add
+                </Button>
+              </Box>
             </Grid>
-            
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+
+            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
               <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Group fontSize="small" color="info" /> Select Staff (Optional)
               </Typography>
@@ -805,37 +1115,44 @@ const Invoice = () => {
               </FormControl>
             </Grid>
 
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
               <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Business fontSize="small" color="warning" /> Supplier (Optional)
               </Typography>
-              <FormControl fullWidth sx={inputStyle}>
-                <Select name="supplierId" value={formData.supplierId} onChange={handleSupplierChange} displayEmpty>
-                  <MenuItem value=""><em>None (use free-text name)</em></MenuItem>
-                  {activeSuppliers.map(s => (
-                    <MenuItem key={s.id} value={s.id}>
-                      {s.name}{s.supplierType ? ` — ${s.supplierType}` : ''}{s.isActive === false ? ' [Inactive]' : ''}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <FormControl fullWidth sx={inputStyle}>
+                    <Select name="supplierId" value={formData.supplierId} onChange={handleSupplierChange} displayEmpty>
+                      <MenuItem value=""><em>None (free-text)</em></MenuItem>
+                      {activeSuppliers.map(s => (
+                        <MenuItem key={s.id} value={s.id}>
+                          {s.name}{s.supplierType ? ` — ${s.supplierType}` : ''}{s.isActive === false ? ' [Inactive]' : ''}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                </Box>
+                <Button variant="contained" onClick={() => setSupplierDialogOpen(true)} sx={addBtnStyle}>
+                  + Add
+                </Button>
+              </Box>
             </Grid>
 
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
               <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <CalendarToday fontSize="small" color="success" /> Date *
               </Typography>
               <TextField name="date" type="date" value={formData.date} onChange={handleHeaderChange} fullWidth sx={inputStyle} required InputLabelProps={{ shrink: true }} />
             </Grid>
 
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
               <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <Flight fontSize="small" color="secondary" /> Airline/Provider Name
               </Typography>
               <TextField name="airlineName" value={formData.airlineName} onChange={handleHeaderChange} fullWidth placeholder="Enter airline or provider name" sx={inputStyle} />
             </Grid>
 
-            <Grid size={{ xs: 12, md: 6, lg: 3 }}>
+            <Grid size={{ xs: 12, md: 6, lg: 4 }}>
               <Typography variant="caption" fontWeight="bold" color="text.secondary" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 0.5 }}>
                 <AttachMoney fontSize="small" color="error" /> Handling Charge (₹)
               </Typography>
@@ -852,7 +1169,6 @@ const Invoice = () => {
 
           <Divider sx={{ my: 4 }} />
 
-          {/* ─── Service Items ─── */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6" fontWeight="bold">Service Items ({items.length})</Typography>
             <Button variant="outlined" startIcon={<Add />} onClick={addItem} sx={{ textTransform: 'none', borderColor: '#e0e0e0', color: 'text.secondary' }}>
@@ -880,7 +1196,7 @@ const Invoice = () => {
                   <TextField label="Selling (₹)" size="small" type="number" fullWidth value={it.sellingAmount} inputProps={{ min: 0, step: 0.01 }} onChange={e => updateItem(idx, 'sellingAmount', e.target.value)} sx={inputStyle} />
                 </Grid>
                 <Grid size={{ xs: 6, md: 2 }}>
-                  <TextField label="Provider Cost (₹)" size="small" type="number" fullWidth value={it.providerCost} inputProps={{ min: 0, step: 0.01 }} onChange={e => updateItem(idx, 'providerCost', e.target.value)} sx={inputStyle} />
+                  <TextField label="Supplier Amount (₹)" size="small" type="number" fullWidth value={it.providerCost} inputProps={{ min: 0, step: 0.01 }} onChange={e => updateItem(idx, 'providerCost', e.target.value)} sx={inputStyle} />
                 </Grid>
                 <Grid size={{ xs: 12, md: 1 }}>
                   <Tooltip title={items.length === 1 ? 'At least one item required' : 'Remove item'}>
@@ -895,7 +1211,6 @@ const Invoice = () => {
             </Paper>
           ))}
 
-          {/* ─── Additional Items ─── */}
           <Box sx={{ mt: 3 }}>
             <Typography variant="h6" fontWeight="bold" gutterBottom>Additional Items / Charges</Typography>
             {formData.additionalItems.length > 0 && (
@@ -927,7 +1242,6 @@ const Invoice = () => {
             )}
           </Box>
 
-          {/* ─── Passengers ─── */}
           <Box sx={{ mt: 3 }}>
             <Typography variant="h6" fontWeight="bold" gutterBottom>Passenger Details</Typography>
             {formData.passengers.length > 0 && (
@@ -952,65 +1266,105 @@ const Invoice = () => {
             )}
           </Box>
 
-          {/* ─── Totals Summary ─── */}
           <Paper elevation={0} sx={{ p: 3, mt: 4, backgroundColor: '#f8fafc', borderRadius: 2, border: '1px solid #e0e0e0' }}>
             <Grid container spacing={2}>
-              <Grid size={{ xs: 6, md: 2 }}>
+              <Grid size={{ xs: 6, md: 3 }}>
                 <Typography variant="caption" color="text.secondary">Items Selling</Typography>
                 <Typography variant="subtitle1" fontWeight="bold">₹{fmtINR(totals.itemsSellingTotal)}</Typography>
               </Grid>
-              <Grid size={{ xs: 6, md: 2 }}>
+              <Grid size={{ xs: 6, md: 3 }}>
                 <Typography variant="caption" color="text.secondary">Additional</Typography>
                 <Typography variant="subtitle1" fontWeight="bold">₹{fmtINR(totals.additionalTotal)}</Typography>
               </Grid>
-              <Grid size={{ xs: 6, md: 2 }}>
+              <Grid size={{ xs: 6, md: 3 }}>
                 <Typography variant="caption" color="text.secondary">Handling</Typography>
                 <Typography variant="subtitle1" fontWeight="bold">₹{fmtINR(totals.handling)}</Typography>
               </Grid>
               <Grid size={{ xs: 6, md: 3 }}>
-                <Typography variant="caption" color="text.secondary">Provider Cost</Typography>
-                <Typography variant="subtitle1" fontWeight="bold" color="text.secondary">₹{fmtINR(totals.itemsProviderTotal)}</Typography>
-              </Grid>
-              <Grid size={{ xs: 12, md: 3 }}>
                 <Typography variant="caption" color="primary" fontWeight="bold">Invoice Total</Typography>
                 <Typography variant="h5" fontWeight="900" color="primary">₹{fmtINR(totals.invoiceTotal)}</Typography>
               </Grid>
             </Grid>
-            <Box sx={{
-              mt: 2, p: 2, borderRadius: 2, textAlign: 'center',
-              backgroundColor: totals.profit > 0 ? '#e8f5e9' : totals.profit < 0 ? '#ffebee' : '#fff8e1',
-              border: '1px solid',
-              borderColor: totals.profit > 0 ? '#a5d6a7' : totals.profit < 0 ? '#ef9a9a' : '#ffe082'
-            }}>
-              <Typography variant="subtitle1" fontWeight="bold" color={totals.profit >= 0 ? 'success.main' : 'error.main'}>
-                Estimated Profit: ₹{fmtINR(totals.profit)}
-              </Typography>
-            </Box>
           </Paper>
 
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
+          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'flex-end', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
             {editing && (
               <Button variant="outlined" onClick={resetForm} disabled={loading} startIcon={<Clear />} sx={{ textTransform: 'none', borderColor: '#e0e0e0', color: 'text.secondary', px: 3 }}>
                 Cancel
               </Button>
             )}
-            <Button type="submit" variant="contained" size="large" disabled={loading} startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <Add />} sx={{ textTransform: 'none', bgcolor: '#1976d2', '&:hover': { bgcolor: '#1565c0' }, px: 4 }}>
+            <Button type="submit" variant="contained" size="large" disabled={loading || isUploadingDocument} startIcon={loading ? <CircularProgress size={20} color="inherit" /> : <Add />} sx={{ textTransform: 'none', bgcolor: '#1976d2', '&:hover': { bgcolor: '#1565c0' }, px: 4 }}>
               {loading ? 'Saving...' : (editing ? 'Update Invoice' : 'Save Invoice')}
             </Button>
+
+            <Button
+              variant="outlined"
+              size="large"
+              onClick={handlePreviewExport}
+              disabled={isExporting || loading}
+              startIcon={isExporting ? <CircularProgress size={20} /> : <PictureAsPdf />}
+              sx={{ textTransform: 'none', borderColor: '#2e7d32', color: '#2e7d32', px: 4, '&:hover': { borderColor: '#1b5e20', bgcolor: '#e8f5e9' } }}
+            >
+              {isExporting ? 'Exporting...' : 'Export PDF'}
+            </Button>
+            {/* FIXED: Document Upload Button using component="label" */}
+            <Button 
+              variant="outlined" 
+              component="label"
+              disabled={loading || isUploadingDocument} 
+              startIcon={isUploadingDocument ? <CircularProgress size={18} /> : <CloudUpload />} 
+              sx={{ textTransform: 'none', borderColor: '#9c27b0', color: '#9c27b0', px: 4, '&:hover': { borderColor: '#7b1fa2', bgcolor: '#f3e5f5' } }}
+            >
+              {isUploadingDocument ? 'Uploading...' : (formData.docName ? 'Change Document' : 'Upload Document')}
+              <input
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                hidden
+                onChange={handleDocUpload}
+              />
+            </Button>
+
+            <Button
+              variant="outlined"
+              size="large"
+              onClick={handlePreviewPrint}
+              disabled={isPrinting || loading}
+              startIcon={isPrinting ? <CircularProgress size={20} /> : <Print />}
+              sx={{ textTransform: 'none', borderColor: '#ed6c02', color: '#ed6c02', px: 4, '&:hover': { borderColor: '#e65100', bgcolor: '#fff3e0' } }}
+            >
+              {isPrinting ? 'Printing...' : 'Print'}
+            </Button>
           </Box>
+          
+          {formData.docName && (
+            <Box sx={{ mt: 2, textAlign: 'right' }}>
+              <Typography variant="caption" sx={{ color: 'success.main', fontWeight: 'bold' }}>
+                Attached: {formData.docName} (Cloudinary, max 10 MB)
+              </Typography>
+            </Box>
+          )}
         </Box>
       </Paper>
 
-      {/* ─── LIST SECTION ─── */}
       <Paper elevation={0} sx={{ p: 4, borderRadius: 3, border: '1px solid #e0e0e0' }}>
-        <Box display="flex" alignItems="center" gap={2} mb={3}>
-          <Avatar sx={{ bgcolor: '#2e7d32', width: 56, height: 56 }}>
-            <Receipt fontSize="large" />
-          </Avatar>
-          <Box>
-            <Typography variant="h5" fontWeight="bold">Recent Invoices</Typography>
-            <Typography variant="body2" color="text.secondary">View and manage all created invoices</Typography>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
+          <Box display="flex" alignItems="center" gap={2}>
+            <Avatar sx={{ bgcolor: '#2e7d32', width: 56, height: 56 }}>
+              <Receipt fontSize="large" />
+            </Avatar>
+            <Box>
+              <Typography variant="h5" fontWeight="bold">Recent Invoices</Typography>
+              <Typography variant="body2" color="text.secondary">View and manage all created invoices</Typography>
+            </Box>
           </Box>
+          <TextField
+            size="small"
+            placeholder="Search by customer name or invoice #"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{ startAdornment: <SearchIcon sx={{ mr: 1, color: 'action.active' }} /> }}
+            sx={{ ...inputStyle, minWidth: 320 }}
+          />
         </Box>
 
         {loading && invoices.length === 0 ? (
@@ -1026,12 +1380,11 @@ const Invoice = () => {
                   <TableCell sx={{ fontWeight: 'bold' }}>Service</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }} align="center">Items</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }} align="right">Amount (₹)</TableCell>
-                  <TableCell sx={{ fontWeight: 'bold' }} align="right">Profit (₹)</TableCell>
                   <TableCell sx={{ fontWeight: 'bold' }}>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {invoices.length > 0 ? invoices.map(inv => {
+                {filteredInvoices.length > 0 ? filteredInvoices.map(inv => {
                   const itemCount = (inv.items && inv.items.length) || inv.ticketCount || 1;
                   return (
                     <TableRow key={inv.id} hover>
@@ -1043,52 +1396,44 @@ const Invoice = () => {
                         <Chip size="small" label={itemCount} color={itemCount > 1 ? 'primary' : 'default'} />
                       </TableCell>
                       <TableCell align="right" sx={{ fontWeight: 'bold' }}>{fmtINR(inv.totalAmount)}</TableCell>
-                      <TableCell align="right" sx={{ color: inv.profit >= 0 ? 'success.main' : 'error.main', fontWeight: 'bold' }}>
-                        {fmtINR(inv.profit)}
-                      </TableCell>
                       <TableCell>
-                        {/* ─── FIXED ACTIONS LAYOUT ─── */}
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Tooltip title="Share via WhatsApp">
-                            <IconButton color="success" onClick={() => handleShareWhatsApp(inv)} size="small">
-                              <WhatsApp fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          
                           <Tooltip title="Edit Invoice">
                             <IconButton color="primary" onClick={() => handleEdit(inv)} size="small">
                               <Edit fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          
                           <Tooltip title="Delete Invoice">
                             <IconButton color="error" onClick={() => handleDelete(inv)} size="small">
                               <Delete fontSize="small" />
                             </IconButton>
                           </Tooltip>
                           
-                          <Tooltip title="More Options">
-                            <IconButton color="default" onClick={(e) => handleMenuOpen(e, inv)} size="small">
-                              <MoreVert fontSize="small" />
+                          <Tooltip title="Print Invoice">
+                            <IconButton color="warning" onClick={() => triggerPrint(inv)} size="small" disabled={isPrinting}>
+                              <Print fontSize="small" />
                             </IconButton>
                           </Tooltip>
-
-                          <Menu anchorEl={anchorEl} keepMounted open={Boolean(anchorEl && currentInvoice?.id === inv.id)} onClose={handleMenuClose}>
-                            <MenuItem onClick={handlePrintFromMenu} disabled={isPrinting}>
-                              <ListItemIcon><Print fontSize="small" /></ListItemIcon>
-                              <ListItemText>{isPrinting ? 'Printing...' : 'Print'}</ListItemText>
-                            </MenuItem>
-                            <MenuItem onClick={handleExportFromMenu} disabled={isExporting}>
-                              <ListItemIcon><PictureAsPdf fontSize="small" /></ListItemIcon>
-                              <ListItemText>{isExporting ? 'Exporting...' : 'Export PDF'}</ListItemText>
-                            </MenuItem>
-                          </Menu>
+                          <Tooltip title="Download PDF">
+                            <IconButton color="success" onClick={() => handleExportPDF(inv)} size="small" disabled={isExporting}>
+                              <PictureAsPdf fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          {(inv.docUrl || inv.docData) && (
+                            <Tooltip title={`Download Document (${inv.docName || 'File'})`}>
+                              <IconButton color="info" onClick={() => downloadDocument(inv.docUrl, inv.docName, inv.docData)} size="small">
+                                <Download fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Box>
                       </TableCell>
                     </TableRow>
                   );
                 }) : (
-                  <TableRow><TableCell colSpan={8} align="center" sx={{ py: 4 }}>No invoices found</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} align="center" sx={{ py: 4 }}>
+                    {searchTerm ? 'No invoices match your search' : 'No invoices found'}
+                  </TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -1104,6 +1449,36 @@ const Invoice = () => {
         <DialogActions>
           <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
           <Button onClick={confirmDelete} color="error" variant="contained">Delete</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={customerDialogOpen} onClose={() => setCustomerDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add New Customer</DialogTitle>
+        <DialogContent>
+          <TextField fullWidth label="Name *" value={newCustomer.name} onChange={(e) => setNewCustomer(p => ({ ...p, name: e.target.value }))} sx={{ mt: 1 }} autoFocus />
+          <TextField fullWidth label="Phone" value={newCustomer.phone} onChange={(e) => setNewCustomer(p => ({ ...p, phone: e.target.value }))} sx={{ mt: 2 }} />
+          <TextField fullWidth label="Email" value={newCustomer.email} onChange={(e) => setNewCustomer(p => ({ ...p, email: e.target.value }))} sx={{ mt: 2 }} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setCustomerDialogOpen(false); setNewCustomer({ name: '', phone: '', email: '' }); }}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveNewCustomer} disabled={!newCustomer.name.trim()} sx={{ bgcolor: '#1976d2', '&:hover': { bgcolor: '#1565c0' } }}>
+            Save Customer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={supplierDialogOpen} onClose={() => setSupplierDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add New Supplier</DialogTitle>
+        <DialogContent>
+          <TextField fullWidth label="Name *" value={newSupplier.name} onChange={(e) => setNewSupplier(p => ({ ...p, name: e.target.value }))} sx={{ mt: 1 }} autoFocus />
+          <TextField fullWidth label="Supplier Type" value={newSupplier.supplierType} onChange={(e) => setNewSupplier(p => ({ ...p, supplierType: e.target.value }))} placeholder="e.g. Airline, Hotel, Transport" sx={{ mt: 2 }} />
+          <TextField fullWidth label="Phone" value={newSupplier.phone} onChange={(e) => setNewSupplier(p => ({ ...p, phone: e.target.value }))} sx={{ mt: 2 }} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => { setSupplierDialogOpen(false); setNewSupplier({ name: '', supplierType: '', phone: '' }); }}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveNewSupplier} disabled={!newSupplier.name.trim()} sx={{ bgcolor: '#1976d2', '&:hover': { bgcolor: '#1565c0' } }}>
+            Save Supplier
+          </Button>
         </DialogActions>
       </Dialog>
 
